@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบฐานข้อมูลอัจฉริยะระดับชุมชน - อ.เสลภูมิ</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts: Inter & Sarabun -->
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Chart.js for Dashboard -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body { font-family: 'Sarabun', sans-serif; margin: 0; padding: 0; overflow: hidden; background: #081224; }
+        #map { width: 100vw; height: 100vh; }
+        .glass-panel { background: rgba(255, 255, 255, 0.96); backdrop-filter: blur(14px); }
+        .tab-btn.active { border-bottom: 2px solid #3b82f6; color: #1d4ed8; font-weight: 600; }
+        .dashboard-shell { background: #f8fafc; }
+        .dashboard-hero {
+            background:
+                radial-gradient(circle at 85% 20%, rgba(56, 189, 248, .36), transparent 28%),
+                radial-gradient(circle at 12% 88%, rgba(45, 212, 191, .22), transparent 30%),
+                linear-gradient(125deg, #0f172a 0%, #172554 52%, #0f766e 100%);
+        }
+        .dashboard-hero::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background-image: linear-gradient(rgba(255,255,255,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.06) 1px, transparent 1px);
+            background-size: 30px 30px;
+            mask-image: linear-gradient(to right, black, transparent 76%);
+        }
+        #dashboardModal h2 { color: #fff; }
+        #summaryCards > div { box-shadow: 0 12px 28px rgba(15, 23, 42, .08); transition: transform .2s ease, box-shadow .2s ease; }
+        #summaryCards > div:hover { transform: translateY(-3px); box-shadow: 0 16px 32px rgba(15, 23, 42, .13); }
+        .map-control-panel { border: 1px solid rgba(255, 255, 255, .75); box-shadow: 0 18px 45px rgba(15, 23, 42, .22); }
+        .detail-section { border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; }
+        .detail-section h4 { background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+
+        /* Toast Animation */
+        @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .toast-enter { animation: slideInRight 0.3s ease-out forwards; }
+    </style>
+</head>
+<body class="bg-gray-100 relative">
+
+    <div id="map"></div>
+
+    <!-- Floating Control Panel -->
+    <div id="mapControlPanel" class="map-control-panel absolute top-4 left-4 glass-panel p-4 rounded-2xl shadow-lg flex flex-col gap-3 z-10">
+        <h1 class="text-xl font-bold text-gray-800 border-b pb-2"><i class="fas fa-map-marked-alt text-blue-600 mr-2"></i>ระบบสำรวจชุมชน</h1>
+        
+        <div class="relative">
+            <label for="placeSearch" class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">ค้นหาสถานที่</label>
+            <i class="fas fa-magnifying-glass pointer-events-none absolute bottom-3 left-3 text-slate-400"></i>
+            <input id="placeSearch" type="search" autocomplete="off" placeholder="เช่น โรงพยาบาล, วัด, หมู่บ้าน..." class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100">
+            <p id="placeSearchHint" class="mt-1 hidden text-xs text-emerald-700"></p>
+        </div>
+
+        <button id="deviceLocationBtn" type="button" onclick="startDeviceLocationSurvey()" class="flex items-center justify-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-100">
+            <i class="fas fa-crosshairs"></i> ใช้ตำแหน่งปัจจุบันของอุปกรณ์
+        </button>
+        <p id="locationStatus" class="hidden rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600"></p>
+
+        <div class="flex gap-2">
+            <button id="togglePinModeBtn" onclick="togglePinMode()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded transition-colors shadow flex items-center justify-center gap-2">
+                <i class="fas fa-map-pin"></i> <span>เปิดโหมดปักหมุด</span>
+            </button>
+            <button onclick="openDashboard()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 px-4 rounded transition-colors shadow flex items-center justify-center gap-2">
+                <i class="fas fa-chart-pie"></i> <span>Dashboard</span>
+            </button>
+        </div>
+        
+        <div id="authStatus" class="text-sm text-gray-600 flex justify-between items-center mt-1">
+            <span>สถานะ: <span id="userStatus" class="font-semibold text-gray-800">ผู้เยี่ยมชม</span></span>
+            <button id="loginBtnToggle" onclick="openLogin()" class="text-blue-600 hover:underline text-xs"><i class="fas fa-sign-in-alt"></i> Admin Login</button>
+        </div>
+        
+        <div id="pinHelpText" class="hidden text-sm text-red-600 bg-red-50 p-2 rounded border border-red-100 mt-2">
+            <i class="fas fa-info-circle"></i> คลิกบนพื้นที่ในแผนที่เพื่อเพิ่มข้อมูล
+        </div>
+    </div>
+
+    <!-- Data Entry Form Modal -->
+    <div id="formModal" class="hidden fixed inset-0 bg-black/60 z-50 flex justify-center items-center backdrop-blur-sm">
+        <div class="glass-panel w-11/12 md:w-3/4 lg:w-2/3 h-5/6 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+            <!-- Header -->
+            <div class="bg-blue-600 text-white px-6 py-4 flex justify-between items-center">
+                <h2 class="text-xl font-bold"><i class="fas fa-clipboard-list mr-2"></i>บันทึกข้อมูลประชากรและครัวเรือน</h2>
+                <button onclick="closeForm()" class="text-white hover:text-red-200 transition text-2xl leading-none">&times;</button>
+            </div>
+            
+            <!-- Tabs -->
+            <div class="flex overflow-x-auto border-b bg-gray-50 px-2" id="formTabs">
+                <!-- Tabs generated dynamically -->
+            </div>
+
+            <!-- Form Content -->
+            <div class="flex-1 overflow-y-auto p-6 bg-white relative">
+                <form id="surveyForm" onsubmit="submitForm(event)">
+                    <input type="hidden" id="latitude" name="latitude">
+                    <input type="hidden" id="longitude" name="longitude">
+                    <div id="formContent">
+                        <!-- Inputs generated dynamically -->
+                    </div>
+                </form>
+            </div>
+
+            <!-- Footer -->
+            <div class="border-t px-6 py-4 bg-gray-50 flex justify-end gap-3">
+                <button onclick="closeForm()" class="px-6 py-2 border rounded text-gray-600 hover:bg-gray-100 transition">ยกเลิก</button>
+                <button onclick="document.getElementById('surveyForm').requestSubmit()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded shadow transition flex items-center gap-2">
+                    <i class="fas fa-save"></i> บันทึกข้อมูล
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard Modal -->
+    <div id="dashboardModal" class="fixed inset-0 bg-slate-950/75 z-50 flex justify-center items-center backdrop-blur-md">
+        <div class="dashboard-shell w-full h-full shadow-2xl flex flex-col overflow-hidden">
+            <div class="bg-slate-950 text-white px-5 md:px-8 py-4 flex justify-between items-center border-b border-white/10">
+                <h2 class="text-xl font-bold"><i class="fas fa-chart-line mr-2"></i>Dashboard สรุปข้อมูลชุมชน</h2>
+                <button onclick="closeDashboard()" class="inline-flex items-center gap-2 rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:bg-cyan-300"><i class="fas fa-map-marked-alt"></i><span>เข้าสู่แผนที่</span></button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-4 md:p-8">
+                <section class="dashboard-hero relative overflow-hidden rounded-3xl px-6 py-7 md:px-9 md:py-9 text-white shadow-xl mb-6">
+                    <div class="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+                        <div class="max-w-2xl">
+                            <p class="text-cyan-200 text-sm font-semibold tracking-wide uppercase">Community Intelligence</p>
+                            <h3 class="mt-2 text-2xl md:text-4xl font-bold leading-tight">เห็นข้อมูลชุมชนชัดเจน<br class="hidden md:block"> พร้อมลงพื้นที่ได้ทันที</h3>
+                            <p class="mt-3 text-sm md:text-base text-slate-200">ตรวจสอบภาพรวม เลือกเข้าสู่แผนที่ แล้วเปิดโหมดปักหมุดเพื่อบันทึกข้อมูลรายครัวเรือนอย่างเป็นระบบ</p>
+                        </div>
+                        <button onclick="closeDashboard()" class="inline-flex w-fit items-center gap-3 rounded-2xl bg-white px-5 py-3 font-semibold text-slate-900 shadow-lg transition hover:bg-cyan-50">
+                            <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-100 text-cyan-700"><i class="fas fa-location-crosshairs"></i></span>
+                            เริ่มสำรวจบนแผนที่
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Summary Cards -->
+                <div id="summaryCards" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div class="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500">
+                        <p class="text-sm text-gray-500">ประชากรทั้งหมด (ที่สำรวจ)</p>
+                        <h3 class="text-2xl font-bold" id="dashTotalPop">0</h3>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow border-l-4 border-green-500">
+                        <p class="text-sm text-gray-500">ผู้สูงอายุ</p>
+                        <h3 class="text-2xl font-bold" id="dashTotalElder">0</h3>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow border-l-4 border-purple-500">
+                        <p class="text-sm text-gray-500">ผู้ป่วยติดเตียง</p>
+                        <h3 class="text-2xl font-bold" id="dashTotalBedridden">0</h3>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow border-l-4 border-yellow-500">
+                        <p class="text-sm text-gray-500">รายได้เฉลี่ย (บ/ด)</p>
+                        <h3 class="text-2xl font-bold" id="dashAvgIncome">0</h3>
+                    </div>
+                </div>
+
+                <!-- Charts -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h4 class="font-semibold text-gray-700 mb-2">สัดส่วนเพศ</h4>
+                        <div class="h-64"><canvas id="chartGender"></canvas></div>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h4 class="font-semibold text-gray-700 mb-2">ความต้องการความช่วยเหลือ</h4>
+                        <div class="h-64"><canvas id="chartNeeds"></canvas></div>
+                    </div>
+                </div>
+
+                <!-- Admin Data Table -->
+                <div class="bg-white p-4 rounded-lg shadow">
+                    <div class="flex justify-between items-center mb-4">
+                        <h4 class="font-semibold text-gray-700">ฐานข้อมูลรายบุคคล <span id="adminBadge" class="hidden text-xs bg-red-100 text-red-600 px-2 py-1 rounded ml-2">Admin View</span></h4>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse text-sm">
+                            <thead>
+                                <tr class="bg-gray-100 text-gray-700">
+                                    <th class="p-3 border-b">วันที่</th>
+                                    <th class="p-3 border-b admin-col hidden">เลข ปชช.</th>
+                                    <th class="p-3 border-b admin-col hidden">ชื่อ-สกุล</th>
+                                    <th class="p-3 border-b">อายุ</th>
+                                    <th class="p-3 border-b">เพศ</th>
+                                    <th class="p-3 border-b">อาชีพ</th>
+                                    <th class="p-3 border-b">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dataTableBody">
+                                <!-- Data rows -->
+                                <tr><td colspan="7" class="text-center p-4 text-gray-500">ยังไม่มีข้อมูล</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Record Details Modal -->
+    <div id="detailModal" class="hidden fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+        <div class="flex h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div class="flex items-start justify-between bg-slate-950 px-6 py-5 text-white">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-[.18em] text-cyan-300">Survey record</p>
+                    <h3 id="detailTitle" class="mt-1 text-xl font-bold">รายละเอียดข้อมูลการสำรวจ</h3>
+                    <p id="detailMeta" class="mt-1 text-sm text-slate-300"></p>
+                </div>
+                <button onclick="closeDetails()" class="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-xl transition hover:bg-white/20" aria-label="ปิด">&times;</button>
+            </div>
+            <div id="detailContent" class="flex-1 space-y-4 overflow-y-auto bg-slate-50 p-5 md:p-6"></div>
+            <div class="flex justify-end gap-3 border-t border-slate-200 bg-white px-6 py-4">
+                <button onclick="focusDetailOnMap()" class="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 font-semibold text-white transition hover:bg-cyan-700"><i class="fas fa-map-marker-alt"></i> ดูตำแหน่งบนแผนที่</button>
+                <button onclick="closeDetails()" class="rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-100">ปิด</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="hidden fixed inset-0 bg-black/50 z-[60] flex justify-center items-center backdrop-blur-sm">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-80">
+            <h3 class="text-lg font-bold mb-4 text-center">เข้าสู่ระบบสำหรับเจ้าหน้าที่</h3>
+            <input type="text" id="username" placeholder="Username" class="w-full border rounded p-2 mb-3 outline-none focus:border-blue-500">
+            <input type="password" id="password" placeholder="Password" class="w-full border rounded p-2 mb-4 outline-none focus:border-blue-500">
+            <div class="flex gap-2">
+                <button onclick="closeLogin()" class="flex-1 bg-gray-200 py-2 rounded hover:bg-gray-300">ยกเลิก</button>
+                <button onclick="handleLogin()" class="flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-700">เข้าสู่ระบบ</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toastContainer" class="fixed bottom-4 right-4 z-[70] flex flex-col gap-2"></div>
+
+    <script>
+        // --- Configurations ---
+        // วาง URL ของ Google Apps Script Web App ของคุณที่นี่ (ที่ลงท้ายด้วย /exec)
+        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyxhVRxGTkzKlkIYlQ1oLjo6zIXDdCdRtBmJQBxoU3llQXSamNl8JmgrVl5_GAJAQ7OSQ/exec"; 
+
+        // State variables
+        let map;
+        let markers = [];
+        let isPinningMode = false;
+        let isAdmin = false;
+        let currentTempMarker = null;
+        let localDataStore = []; // จำลองฐานข้อมูล
+        let charts = {};
+        let activeDetailRecord = null;
+        let useDeviceLocation = false;
+        let locationRequestId = 0;
+
+        // โครงสร้างฟอร์ม (Schema) ครอบคลุมตามโจทย์
+        const formSchema = {
+            "ข้อมูลบุคคล": [
+                {name: "id_card", label: "เลขบัตรประชาชน", type: "text", adminOnly: true},
+                {name: "name", label: "ชื่อ-สกุล", type: "text", adminOnly: true},
+                {name: "age", label: "อายุ", type: "number"},
+                {name: "gender", label: "เพศ", type: "select", options: ["ชาย", "หญิง", "อื่นๆ"]},
+                {name: "religion", label: "ศาสนา", type: "select", options: ["พุทธ", "คริสต์", "อิสลาม", "อื่นๆ"]},
+                {name: "status", label: "สถานภาพ", type: "select", options: ["โสด", "สมรส", "หย่าร้าง", "หม้าย"]},
+                {name: "education", label: "การศึกษา", type: "select", options: ["ไม่ได้ศึกษา", "ประถม", "มัธยม", "ปวช./ปวส.", "ปริญญาตรีขึ้นไป"]},
+                {name: "occupation", label: "อาชีพหลัก", type: "text"},
+                {name: "income", label: "รายได้ (บาท/เดือน)", type: "number"},
+                {name: "phone", label: "เบอร์โทร", type: "tel", adminOnly: true}
+            ],
+            "ข้อมูลครัวเรือน": [
+                {name: "hh_members", label: "จำนวนสมาชิก (คน)", type: "number"},
+                {name: "hh_residents", label: "ผู้อาศัยจริง (คน)", type: "number"},
+                {name: "hh_type", label: "สถานะบ้าน", type: "select", options: ["บ้านของตนเอง", "บ้านเช่า", "บ้านว่าง"]},
+                {name: "hh_elder", label: "ผู้สูงอายุ (คน)", type: "number", default: 0},
+                {name: "hh_child", label: "เด็ก (คน)", type: "number", default: 0},
+                {name: "hh_disabled", label: "ผู้พิการ (คน)", type: "number", default: 0},
+                {name: "hh_bedridden", label: "ผู้ป่วยติดเตียง (คน)", type: "number", default: 0}
+            ],
+            "ข้อมูลสุขภาพ": [
+                {name: "hl_disease", label: "โรคประจำตัว", type: "text"},
+                {name: "hl_right", label: "สิทธิการรักษา", type: "select", options: ["บัตรทอง", "ประกันสังคม", "เบิกจ่ายตรง", "จ่ายเอง"]},
+                {name: "hl_bmi", label: "BMI", type: "number"},
+                {name: "hl_smoke", label: "การสูบบุหรี่", type: "select", options: ["ไม่สูบ", "สูบ", "เคยสูบแต่เลิกแล้ว"]},
+                {name: "hl_alcohol", label: "การดื่มสุรา", type: "select", options: ["ไม่ดื่ม", "ดื่ม", "เคยดื่มแต่เลิกแล้ว"]},
+                {name: "hl_exercise", label: "การออกกำลังกาย", type: "select", options: ["ไม่ออก", "1-2 วัน/สัปดาห์", "3-5 วัน/สัปดาห์", "ทุกวัน"]},
+                {name: "hl_stress", label: "ความเครียด", type: "select", options: ["ไม่มี/น้อย", "ปานกลาง", "สูง"]},
+                {name: "hl_screen", label: "การคัดกรองโรคปีนี้", type: "select", options: ["คัดกรองแล้ว", "ยังไม่ได้คัดกรอง"]}
+            ],
+            "ข้อมูลเศรษฐกิจ": [
+                {name: "ec_income_hh", label: "รายได้รวมครัวเรือน/เดือน", type: "number"},
+                {name: "ec_expense_hh", label: "รายจ่ายรวม/เดือน", type: "number"},
+                {name: "ec_debt", label: "หนี้สินรวม", type: "number"},
+                {name: "ec_side_job", label: "อาชีพเสริม", type: "text"},
+                {name: "ec_poverty", label: "สถานะความยากจน (TPMAP)", type: "select", options: ["ไม่ใช่เป้าหมาย", "เป้าหมายยากจน"]},
+                {name: "ec_unemployed", label: "ผู้ว่างงานในบ้าน (คน)", type: "number", default: 0}
+            ],
+            "ข้อมูลที่อยู่อาศัย & สิ่งแวดล้อม": [
+                {name: "en_house_type", label: "ประเภทบ้าน", type: "select", options: ["ตึก", "ครึ่งตึกครึ่งไม้", "ไม้", "วัสดุชั่วคราว"]},
+                {name: "en_stability", label: "ความมั่นคงของบ้าน", type: "select", options: ["มั่นคง", "ต้องซ่อมแซม", "ทรุดโทรม"]},
+                {name: "en_water", label: "น้ำประปา", type: "select", options: ["มีและเพียงพอ", "มีแต่ไม่พอ", "ไม่มี"]},
+                {name: "en_electric", label: "ไฟฟ้า", type: "select", options: ["มีใช้", "ไม่มี"]},
+                {name: "en_internet", label: "อินเทอร์เน็ต", type: "select", options: ["มี", "ไม่มี"]},
+                {name: "en_garbage", label: "การจัดการขยะ", type: "select", options: ["รถเก็บขยะ", "เผา/ฝังเอง", "ทิ้งในที่สาธารณะ"]},
+                {name: "en_risk", label: "พื้นที่เสี่ยง (เช่น น้ำท่วม)", type: "text"}
+            ],
+            "ความต้องการความช่วยเหลือ": [
+                {name: "nd_road", label: "ปรับปรุงถนน", type: "checkbox"},
+                {name: "nd_water", label: "น้ำประปา/น้ำเกษตร", type: "checkbox"},
+                {name: "nd_electric", label: "ขยายเขตไฟฟ้า", type: "checkbox"},
+                {name: "nd_internet", label: "อินเทอร์เน็ตชุมชน", type: "checkbox"},
+                {name: "nd_job", label: "ส่งเสริมอาชีพ", type: "checkbox"},
+                {name: "nd_education", label: "ทุนการศึกษา", type: "checkbox"},
+                {name: "nd_health", label: "ดูแลสุขภาพ/ผู้ป่วย", type: "checkbox"},
+                {name: "nd_welfare", label: "สวัสดิการสังคม", type: "checkbox"}
+            ]
+        };
+
+        // --- Custom Toast UI (No alerts) ---
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            const color = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-blue-500';
+            const icon = type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-triangle' : 'fa-info-circle';
+            
+            toast.className = `${color} text-white px-4 py-3 rounded shadow-lg flex items-center gap-3 toast-enter max-w-xs`;
+            toast.innerHTML = `<i class="fas ${icon}"></i> <span>${message}</span>`;
+            
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // --- Form Generation ---
+        function buildForm() {
+            const tabsContainer = document.getElementById('formTabs');
+            const contentContainer = document.getElementById('formContent');
+            
+            let isFirst = true;
+            for (const [category, fields] of Object.entries(formSchema)) {
+                // Create Tab
+                const tabId = 'tab-' + category.replace(/\s+/g, '-');
+                const tabBtn = document.createElement('button');
+                tabBtn.type = 'button';
+                tabBtn.className = `tab-btn px-4 py-3 whitespace-nowrap text-gray-500 hover:text-gray-800 transition ${isFirst ? 'active' : ''}`;
+                tabBtn.innerText = category;
+                tabBtn.onclick = (e) => switchTab(e, tabId);
+                tabsContainer.appendChild(tabBtn);
+
+                // Create Content Section
+                const section = document.createElement('div');
+                section.id = tabId;
+                section.className = `form-section grid grid-cols-1 md:grid-cols-2 gap-4 ${isFirst ? 'block' : 'hidden'}`;
+                
+                fields.forEach(field => {
+                    const wrap = document.createElement('div');
+                    const requiredAttr = field.required !== false ? '' : ''; // Optional logic
+                    
+                    let inputHtml = '';
+                    if (field.type === 'select') {
+                        const opts = field.options.map(opt => `<option value="${opt}">${opt}</option>`).join('');
+                        inputHtml = `<select name="${field.name}" class="w-full p-2 border rounded focus:ring-2 focus:ring-blue-400 outline-none"><option value="">-- เลือก --</option>${opts}</select>`;
+                    } else if (field.type === 'checkbox') {
+                        inputHtml = `<div class="flex items-center h-full pt-6"><label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" name="${field.name}" value="ต้องการ" class="w-5 h-5 text-blue-600 rounded"> <span class="text-gray-700">${field.label}</span></label></div>`;
+                        wrap.innerHTML = inputHtml; // Override wrapper structure for checkbox
+                        section.appendChild(wrap);
+                        return;
+                    } else {
+                        const def = field.default !== undefined ? `value="${field.default}"` : '';
+                        inputHtml = `<input type="${field.type}" name="${field.name}" ${def} class="w-full p-2 border rounded focus:ring-2 focus:ring-blue-400 outline-none" placeholder="${field.label}">`;
+                    }
+                    
+                    wrap.innerHTML = `<label class="block text-sm text-gray-600 mb-1">${field.label} ${field.adminOnly ? '<span class="text-xs text-red-400">(ข้อมูลปกปิด)</span>' : ''}</label>${inputHtml}`;
+                    section.appendChild(wrap);
+                });
+
+                contentContainer.appendChild(section);
+                isFirst = false;
+            }
+        }
+
+        function switchTab(e, targetId) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+            
+            document.querySelectorAll('.form-section').forEach(sec => sec.classList.add('hidden'));
+            document.getElementById(targetId).classList.remove('hidden');
+        }
+
+        // --- Map & Interaction ---
+        function initMap() {
+            // ศูนย์กลางอำเภอเสลภูมิ จ.ร้อยเอ็ด
+            const selaphum = { lat: 16.0371, lng: 103.9515 };
+            
+            map = new google.maps.Map(document.getElementById("map"), {
+                zoom: 12,
+                center: selaphum,
+                mapTypeId: google.maps.MapTypeId.SATELLITE, // ดาวเทียมตามโจทย์
+                mapTypeControl: true,
+                streetViewControl: false,
+                fullscreenControl: false
+            });
+
+            buildForm();
+            initPlaceSearch();
+
+            // Click event on map
+            map.addListener("click", (e) => {
+                if (!isPinningMode) return;
+                
+                const lat = e.latLng.lat();
+                const lng = e.latLng.lng();
+                useDeviceLocation = false;
+                locationRequestId++;
+                document.getElementById('locationStatus').classList.add('hidden');
+                
+                // Clear previous temp marker
+                if (currentTempMarker) currentTempMarker.setMap(null);
+                
+                currentTempMarker = new google.maps.Marker({
+                    position: e.latLng,
+                    map: map,
+                    animation: google.maps.Animation.DROP,
+                    icon: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+                });
+
+                // Pre-fill hidden coords
+                document.getElementById('latitude').value = lat;
+                document.getElementById('longitude').value = lng;
+                
+                openForm();
+            });
+            
+            // Load Mock/Saved Data
+            renderMarkersOnMap();
+        }
+
+        function initPlaceSearch() {
+            const input = document.getElementById('placeSearch');
+            const hint = document.getElementById('placeSearchHint');
+
+            if (!input || !google.maps.places) {
+                input?.setAttribute('placeholder', 'ไม่สามารถเปิดค้นหาสถานที่ได้');
+                return;
+            }
+
+            const autocomplete = new google.maps.places.Autocomplete(input, {
+                componentRestrictions: { country: 'th' },
+                fields: ['geometry', 'name', 'formatted_address']
+            });
+
+            autocomplete.addListener('place_changed', () => {
+                const place = autocomplete.getPlace();
+                if (!place.geometry || !place.geometry.location) {
+                    showToast('ไม่พบพิกัดของสถานที่ที่เลือก', 'error');
+                    return;
+                }
+
+                if (place.geometry.viewport) {
+                    map.fitBounds(place.geometry.viewport);
+                } else {
+                    map.setCenter(place.geometry.location);
+                    map.setZoom(17);
+                }
+
+                hint.textContent = place.formatted_address || place.name || 'พบสถานที่แล้ว';
+                hint.classList.remove('hidden');
+                input.blur();
+            });
+        }
+
+        function setLocationStatus(message) {
+            const status = document.getElementById('locationStatus');
+            status.textContent = message;
+            status.classList.remove('hidden');
+        }
+
+        function setSurveyLocation(lat, lng) {
+            if (currentTempMarker) currentTempMarker.setMap(null);
+
+            currentTempMarker = new google.maps.Marker({
+                position: { lat, lng },
+                map: map,
+                animation: google.maps.Animation.DROP,
+                icon: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+            });
+
+            document.getElementById('latitude').value = lat;
+            document.getElementById('longitude').value = lng;
+            map.panTo({ lat, lng });
+            if (map.getZoom() < 17) map.setZoom(17);
+        }
+
+        function getDeviceLocation(options = {}) {
+            const openForm = options.openForm === true;
+            const silent = options.silent === true;
+            const requestId = ++locationRequestId;
+
+            if (!navigator.geolocation) {
+                if (!silent) {
+                    setLocationStatus('อุปกรณ์นี้ไม่รองรับการระบุตำแหน่ง กรุณาคลิกเลือกตำแหน่งบนแผนที่');
+                    showToast('อุปกรณ์นี้ไม่รองรับการระบุตำแหน่ง', 'error');
+                }
+                return Promise.resolve(false);
+            }
+
+            if (!silent) setLocationStatus('กำลังระบุตำแหน่งปัจจุบันของอุปกรณ์...');
+
+            return new Promise(resolve => {
+                navigator.geolocation.getCurrentPosition(
+                    position => {
+                        if (!isPinningMode || requestId !== locationRequestId) {
+                            resolve(false);
+                            return;
+                        }
+                        const lat = position.coords.latitude;
+                        const lng = position.coords.longitude;
+                        useDeviceLocation = true;
+                        setSurveyLocation(lat, lng);
+                        setLocationStatus('ใช้ตำแหน่งปัจจุบันแล้ว ความแม่นยำประมาณ ' + Math.round(position.coords.accuracy) + ' เมตร');
+                        if (!silent) showToast('กำหนดตำแหน่งจากอุปกรณ์เรียบร้อย', 'success');
+                        if (openForm) openForm();
+                        resolve(true);
+                    },
+                    error => {
+                        if (!isPinningMode || requestId !== locationRequestId) {
+                            resolve(false);
+                            return;
+                        }
+                        if (!silent) {
+                            const message = error.code === 1
+                                ? 'กรุณาอนุญาตให้เว็บไซต์เข้าถึงตำแหน่ง แล้วลองอีกครั้ง'
+                                : 'ไม่พบตำแหน่งปัจจุบัน กรุณาคลิกเลือกตำแหน่งบนแผนที่';
+                            setLocationStatus(message);
+                            showToast(message, 'error');
+                        }
+                        resolve(false);
+                    },
+                    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+                );
+            });
+        }
+
+        function startDeviceLocationSurvey() {
+            if (!isPinningMode) {
+                togglePinMode();
+                return;
+            }
+            getDeviceLocation({ openForm: true });
+        }
+
+        function togglePinMode() {
+            isPinningMode = !isPinningMode;
+            const btn = document.getElementById('togglePinModeBtn');
+            const help = document.getElementById('pinHelpText');
+            
+            if (isPinningMode) {
+                btn.classList.replace('bg-blue-600', 'bg-red-600');
+                btn.classList.replace('hover:bg-blue-700', 'hover:bg-red-700');
+                btn.innerHTML = '<i class="fas fa-times"></i> <span>ยกเลิกการปักหมุด</span>';
+                help.classList.remove('hidden');
+                map.setOptions({ draggableCursor: 'crosshair' });
+                getDeviceLocation({ openForm: true });
+            } else {
+                btn.classList.replace('bg-red-600', 'bg-blue-600');
+                btn.classList.replace('hover:bg-red-700', 'hover:bg-blue-700');
+                btn.innerHTML = '<i class="fas fa-map-pin"></i> <span>เปิดโหมดปักหมุด</span>';
+                help.classList.add('hidden');
+                document.getElementById('locationStatus').classList.add('hidden');
+                map.setOptions({ draggableCursor: '' });
+                useDeviceLocation = false;
+                locationRequestId++;
+                if (currentTempMarker) {
+                    currentTempMarker.setMap(null);
+                    currentTempMarker = null;
+                }
+            }
+        }
+
+        function openForm() { document.getElementById('formModal').classList.remove('hidden'); }
+        function closeForm() { 
+            document.getElementById('formModal').classList.add('hidden'); 
+            document.getElementById('surveyForm').reset();
+            locationRequestId++;
+            if (currentTempMarker) {
+                currentTempMarker.setMap(null);
+                currentTempMarker = null;
+            }
+            // Reset tab
+            document.querySelectorAll('.tab-btn')[0].click();
+        }
+
+        // --- Form Submission & API ---
+        async function submitForm(e) {
+            e.preventDefault();
+
+            if (useDeviceLocation) {
+                await getDeviceLocation({ silent: true });
+            }
+            
+            const formData = new FormData(e.target);
+            const dataObj = {};
+            formData.forEach((value, key) => {
+                // Handle checkboxes (multiple values or boolean)
+                if(dataObj[key]) {
+                    dataObj[key] = dataObj[key] + ", " + value;
+                } else {
+                    dataObj[key] = value || "";
+                }
+            });
+            
+            // Add Timestamp
+            dataObj['timestamp'] = new Date().toISOString();
+
+            // Store Locally for immediate UI update
+            localDataStore.push(dataObj);
+            
+            // Create Permanent Marker
+            createMarker(parseFloat(dataObj.latitude), parseFloat(dataObj.longitude), dataObj);
+            
+            // Clear temp state
+            closeForm();
+            togglePinMode();
+            showToast('บันทึกลงฐานข้อมูลในเครื่องสำเร็จ พยายามส่งขึ้น Cloud...', 'info');
+
+            // Send to Google Apps Script (If URL provided)
+            if (GAS_WEB_APP_URL !== "YOUR_GAS_WEB_APP_URL_HERE") {
+                try {
+                    // Using text/plain to avoid strict CORS preflight issues on some setups
+                    const response = await fetch(GAS_WEB_APP_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                        body: JSON.stringify(dataObj)
+                    });
+                    const result = await response.json();
+                    if (!response.ok || result.status !== 'success') {
+                        throw new Error(result.message || 'GAS rejected the request');
+                    }
+                    showToast('ซิงค์ข้อมูลลง Google Sheets สำเร็จ!', 'success');
+                } catch (error) {
+                    console.error("GAS Submit Error:", error);
+                    showToast('ไม่สามารถส่งข้อมูลไป GAS ได้ บันทึกไว้ในเครื่องเท่านั้น', 'error');
+                }
+            } else {
+                setTimeout(() => showToast('ไม่ได้ตั้งค่า URL ของ GAS (บันทึกจำลองสำเร็จ)', 'success'), 1000);
+            }
+            
+            updateDashboardData();
+        }
+
+        function createMarker(lat, lng, data) {
+            const marker = new google.maps.Marker({
+                position: { lat, lng },
+                map: map,
+                icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+            });
+            
+            const infoWindow = new google.maps.InfoWindow({
+                content: `
+                    <div class="p-2 min-w-[200px]">
+                        <h3 class="font-bold border-b pb-1">ข้อมูลครัวเรือน</h3>
+                        <p class="text-sm mt-1"><b>รายได้ครัวเรือน:</b> ${data.ec_income_hh || 'ไม่ระบุ'} บ.</p>
+                        <p class="text-sm"><b>ผู้อาศัย:</b> ${data.hh_residents || 0} คน</p>
+                        <p class="text-sm text-gray-500 mt-2 text-xs">(รายละเอียดดูใน Dashboard)</p>
+                    </div>
+                `
+            });
+            
+            marker.addListener('click', () => openRecordDetails(data));
+            markers.push(marker);
+        }
+
+        function renderMarkersOnMap() {
+            // For persistence, you'd fetch from GAS here. Using localDataStore for now.
+            markers.forEach(m => m.setMap(null));
+            markers = [];
+            localDataStore.forEach(d => createMarker(parseFloat(d.latitude), parseFloat(d.longitude), d));
+        }
+
+        function createDetailValue(label, value) {
+            const item = document.createElement('div');
+            item.className = 'rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-100';
+
+            const fieldLabel = document.createElement('dt');
+            fieldLabel.className = 'text-xs font-medium text-slate-500';
+            fieldLabel.textContent = label;
+
+            const fieldValue = document.createElement('dd');
+            fieldValue.className = 'mt-1 text-sm font-semibold text-slate-800 break-words';
+            fieldValue.textContent = value === undefined || value === null || value === '' ? 'ไม่ระบุ' : value;
+
+            item.append(fieldLabel, fieldValue);
+            return item;
+        }
+
+        function openRecordDetails(data) {
+            activeDetailRecord = data;
+            const content = document.getElementById('detailContent');
+            content.replaceChildren();
+
+            const title = document.getElementById('detailTitle');
+            title.textContent = isAdmin && data.name ? data.name : 'รายละเอียดข้อมูลการสำรวจ';
+
+            const detailDate = data.timestamp ? new Date(data.timestamp).toLocaleString('th-TH') : 'ไม่ระบุวันบันทึก';
+            document.getElementById('detailMeta').textContent = 'บันทึกเมื่อ ' + detailDate;
+
+            Object.entries(formSchema).forEach(([category, fields]) => {
+                const visibleFields = fields.filter(field => !field.adminOnly || isAdmin);
+                if (!visibleFields.length) return;
+
+                const section = document.createElement('section');
+                section.className = 'detail-section bg-white shadow-sm';
+
+                const heading = document.createElement('h4');
+                heading.className = 'px-4 py-3 text-sm font-bold text-slate-800';
+                heading.textContent = category;
+
+                const grid = document.createElement('dl');
+                grid.className = 'grid grid-cols-1 gap-3 p-4 sm:grid-cols-2';
+                visibleFields.forEach(field => grid.appendChild(createDetailValue(field.label, data[field.name])));
+
+                section.append(heading, grid);
+                content.appendChild(section);
+            });
+
+            const locationSection = document.createElement('section');
+            locationSection.className = 'detail-section bg-white shadow-sm';
+            locationSection.innerHTML = '<h4 class="px-4 py-3 text-sm font-bold text-slate-800">ตำแหน่งสำรวจ</h4>';
+            const locationGrid = document.createElement('dl');
+            locationGrid.className = 'grid grid-cols-1 gap-3 p-4 sm:grid-cols-2';
+            locationGrid.append(
+                createDetailValue('ละติจูด', data.latitude),
+                createDetailValue('ลองจิจูด', data.longitude)
+            );
+            locationSection.appendChild(locationGrid);
+            content.appendChild(locationSection);
+
+            document.getElementById('detailModal').classList.remove('hidden');
+        }
+
+        function closeDetails() {
+            document.getElementById('detailModal').classList.add('hidden');
+            activeDetailRecord = null;
+        }
+
+        function focusDetailOnMap() {
+            if (!activeDetailRecord) return;
+            const record = activeDetailRecord;
+            closeDetails();
+            focusMap(parseFloat(record.latitude), parseFloat(record.longitude));
+        }
+
+        // --- Dashboard & Analytics ---
+        function openDashboard() { 
+            updateDashboardData();
+            document.getElementById('dashboardModal').classList.remove('hidden'); 
+        }
+        function closeDashboard() {
+            document.getElementById('dashboardModal').classList.add('hidden');
+            if (map && window.google) {
+                setTimeout(() => {
+                    google.maps.event.trigger(map, 'resize');
+                    map.setCenter({ lat: 16.0371, lng: 103.9515 });
+                }, 100);
+            }
+        }
+
+        function updateDashboardData() {
+            const totalRecords = localDataStore.length;
+            const totalPop = localDataStore.reduce((total, row) => total + (parseInt(row.hh_residents) || 0), 0);
+            let elders = 0, bedridden = 0, totalIncome = 0, incomeCount = 0;
+            let genderCount = { "ชาย": 0, "หญิง": 0, "อื่นๆ": 0 };
+            let needsCount = {};
+
+            const tbody = document.getElementById('dataTableBody');
+            tbody.innerHTML = '';
+
+            localDataStore.forEach(row => {
+                elders += parseInt(row.hh_elder) || 0;
+                bedridden += parseInt(row.hh_bedridden) || 0;
+                if (row.income) {
+                    totalIncome += parseFloat(row.income);
+                    incomeCount++;
+                }
+                if (row.gender && genderCount[row.gender] !== undefined) genderCount[row.gender]++;
+
+                // Needs analysis
+                const needsKeys = ['nd_road', 'nd_water', 'nd_electric', 'nd_internet', 'nd_job', 'nd_education', 'nd_health', 'nd_welfare'];
+                needsKeys.forEach(k => {
+                    if(row[k]) {
+                        const label = formSchema["ความต้องการความช่วยเหลือ"].find(f => f.name === k).label;
+                        needsCount[label] = (needsCount[label] || 0) + 1;
+                    }
+                });
+
+                // Build Table Row
+                const tr = document.createElement('tr');
+                tr.className = "border-b hover:bg-gray-50";
+                
+                const date = row.timestamp ? new Date(row.timestamp).toLocaleDateString('th-TH') : '-';
+                // Security logic
+                const idCard = isAdmin ? (row.id_card || '-') : '***-****-****';
+                const name = isAdmin ? (row.name || '-') : 'ปกปิดข้อมูล';
+                
+                tr.innerHTML = `
+                    <td class="p-3">${date}</td>
+                    <td class="p-3 admin-col ${isAdmin ? '' : 'hidden'}">${idCard}</td>
+                    <td class="p-3 admin-col ${isAdmin ? '' : 'hidden'}">${name}</td>
+                    <td class="p-3">${row.age || '-'}</td>
+                    <td class="p-3">${row.gender || '-'}</td>
+                    <td class="p-3">${row.occupation || '-'}</td>
+                    <td class="p-3">
+                        <button class="text-blue-500 hover:text-blue-700" title="ดูในแผนที่" onclick="focusMap(${row.latitude}, ${row.longitude})"><i class="fas fa-map-marker-alt"></i></button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            if(totalRecords === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center p-4 text-gray-500">ยังไม่มีข้อมูล</td></tr>';
+            }
+
+            // Update Summary Cards
+            document.getElementById('dashTotalPop').innerText = totalPop;
+            document.getElementById('dashTotalElder').innerText = elders;
+            document.getElementById('dashTotalBedridden').innerText = bedridden;
+            document.getElementById('dashAvgIncome').innerText = incomeCount > 0 ? (totalIncome / incomeCount).toLocaleString('th-TH', {maximumFractionDigits:0}) : 0;
+
+            renderCharts(genderCount, needsCount);
+        }
+
+        function focusMap(lat, lng) {
+            closeDashboard();
+            map.setCenter({lat, lng});
+            map.setZoom(18);
+        }
+
+        function renderCharts(genderData, needsData) {
+            // Destroy existing charts
+            if(charts.gender) charts.gender.destroy();
+            if(charts.needs) charts.needs.destroy();
+
+            // Gender Chart
+            const ctxG = document.getElementById('chartGender').getContext('2d');
+            charts.gender = new Chart(ctxG, {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(genderData),
+                    datasets: [{
+                        data: Object.values(genderData),
+                        backgroundColor: ['#3b82f6', '#ec4899', '#9ca3af']
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+
+            // Needs Chart
+            const ctxN = document.getElementById('chartNeeds').getContext('2d');
+            const sortedNeeds = Object.entries(needsData).sort((a, b) => b[1] - a[1]);
+            charts.needs = new Chart(ctxN, {
+                type: 'bar',
+                data: {
+                    labels: sortedNeeds.map(item => item[0]),
+                    datasets: [{
+                        label: 'จำนวนครัวเรือนที่ต้องการ',
+                        data: sortedNeeds.map(item => item[1]),
+                        backgroundColor: '#10b981'
+                    }]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+                }
+            });
+        }
+
+        // --- Authentication ---
+        function openLogin() { 
+            if(isAdmin) {
+                logout();
+            } else {
+                document.getElementById('loginModal').classList.remove('hidden'); 
+            }
+        }
+        function closeLogin() { document.getElementById('loginModal').classList.add('hidden'); }
+        
+        function handleLogin() {
+            const u = document.getElementById('username').value;
+            const p = document.getElementById('password').value;
+            
+            if(u === 'admin' && p === '1234') {
+                isAdmin = true;
+                showToast('เข้าสู่ระบบสำเร็จ', 'success');
+                document.getElementById('userStatus').innerText = 'Admin';
+                document.getElementById('loginBtnToggle').innerHTML = '<i class="fas fa-sign-out-alt"></i> Logout';
+                document.getElementById('adminBadge').classList.remove('hidden');
+                
+                // Show admin columns
+                document.querySelectorAll('.admin-col').forEach(el => el.classList.remove('hidden'));
+                
+                closeLogin();
+                if(!document.getElementById('dashboardModal').classList.contains('hidden')){
+                    updateDashboardData();
+                }
+            } else {
+                showToast('Username หรือ Password ไม่ถูกต้อง', 'error');
+            }
+            document.getElementById('password').value = '';
+        }
+
+        function logout() {
+            isAdmin = false;
+            document.getElementById('userStatus').innerText = 'ผู้เยี่ยมชม';
+            document.getElementById('loginBtnToggle').innerHTML = '<i class="fas fa-sign-in-alt"></i> Admin Login';
+            document.getElementById('adminBadge').classList.add('hidden');
+            
+            // Hide admin columns
+            document.querySelectorAll('.admin-col').forEach(el => el.classList.add('hidden'));
+            
+            showToast('ออกจากระบบแล้ว', 'info');
+            if(!document.getElementById('dashboardModal').classList.contains('hidden')){
+                updateDashboardData();
+            }
+        }
+        document.addEventListener('DOMContentLoaded', updateDashboardData);
+    </script>
+
+    <!-- Load Google Maps API -->
+    <!-- หมายเหตุ: การใส่ API Key ตรงๆ ใน HTML มีความเสี่ยงด้านความปลอดภัย แนะนำให้จำกัดโดเมนใน Google Cloud Console -->
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA1xmTQ_hd4n-FPyqIiUqPhAElgMRdYfUo&libraries=places&language=th&region=TH&callback=initMap"></script>
+</body>
+</html>
